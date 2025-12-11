@@ -1,0 +1,246 @@
+; ==============================================================
+; Author : Joshua Muthenya Wambua
+; Date   : 10/12/2025
+; System : 4-Way Traffic Light Controller with Pedestrian Interrupt
+; Simulator : Jubin 8085 (RST 7_5, vector 003CH)
+; Notes :
+;   - No EQU, DB, DW (Jubin does not accept them)
+;   - Interrupt is short (sets flag only)
+;   - Pedestrian service handled in main flow
+;   - Controller resumes exactly where it left off
+; ==============================================================
+
+
+; --------------------------------------------------------------
+; RESET VECTOR
+; --------------------------------------------------------------
+        #ORG 0000H
+        JMP START
+
+
+; --------------------------------------------------------------
+; RST 7_5 INTERRUPT VECTOR (003CH)
+; --------------------------------------------------------------
+        #ORG 003CH
+        JMP PED_ISR          ; short ISR → flag only
+
+
+; --------------------------------------------------------------
+; MEMORY LOCATIONS (use literal values only)
+; --------------------------------------------------------------
+; 9000H → pedestrian request flag
+; 9001H → saved current traffic state
+; --------------------------------------------------------------
+
+
+; --------------------------------------------------------------
+; MAIN PROGRAM
+; --------------------------------------------------------------
+START:
+        EI                      ; enable interrupts
+
+        MVI A,08H               ; enable RST 7_5 (bit3)
+        SIM
+
+MAIN_LOOP:
+
+        ; ------- STATE 0 : NS GREEN -------
+        MVI A,00H
+        STA 9001H               ; save state
+        CALL NS_GREEN_PHASE
+
+        ; ------- STATE 1 : NS YELLOW -------
+        MVI A,01H
+        STA 9001H
+        CALL NS_YELLOW_PHASE
+
+        ; ------- STATE 2 : EW GREEN -------
+        MVI A,02H
+        STA 9001H
+        CALL EW_GREEN_PHASE
+
+        ; ------- STATE 3 : EW YELLOW -------
+        MVI A,03H
+        STA 9001H
+        CALL EW_YELLOW_PHASE
+
+        ; ------- CHECK PEDESTRIAN -------
+        CALL CHECK_PED
+
+        JMP MAIN_LOOP
+
+
+
+; ==============================================================
+; TRAFFIC LIGHT PHASES
+; ==============================================================
+
+; -------- NORTH-SOUTH GREEN --------
+NS_GREEN_PHASE:
+        MVI A,01H
+        OUT 01H         ; NS Green
+        MVI A,04H
+        OUT 02H         ; EW Red
+        CALL DELAY_10S
+        RET
+
+; -------- NORTH-SOUTH YELLOW --------
+NS_YELLOW_PHASE:
+        MVI A,02H
+        OUT 01H         ; NS Yellow
+        MVI A,04H
+        OUT 02H         ; EW Red
+        CALL DELAY_3S
+        RET
+
+; -------- EAST-WEST GREEN --------
+EW_GREEN_PHASE:
+        MVI A,04H
+        OUT 01H         ; NS Red
+        MVI A,01H
+        OUT 02H         ; EW Green
+        CALL DELAY_10S
+        RET
+
+; -------- EAST-WEST YELLOW --------
+EW_YELLOW_PHASE:
+        MVI A,04H
+        OUT 01H         ; NS Red
+        MVI A,02H
+        OUT 02H         ; EW Yellow
+        CALL DELAY_3S
+        RET
+
+
+
+; ==============================================================
+; INTERRUPT SERVICE ROUTINE (SHORT)
+; ==============================================================
+
+PED_ISR:
+        DI
+        MVI A,01H
+        STA 9000H       ; set pedestrian request flag
+        EI
+        RET
+
+
+
+; ==============================================================
+; CHECK PEDESTRIAN FLAG
+; ==============================================================
+
+CHECK_PED:
+        LDA 9000H
+        CPI 01H
+        JNZ NO_PED
+
+        ; clear flag
+        MVI A,00H
+        STA 9000H
+
+        CALL SERVICE_PED
+
+NO_PED:
+        RET
+
+
+
+; ==============================================================
+; PEDESTRIAN SERVICE ROUTINE
+; ==============================================================
+
+SERVICE_PED:
+
+        ; --- BOTH YELLOW ---
+        MVI A,02H
+        OUT 01H
+        MVI A,02H
+        OUT 02H
+        CALL DELAY_3S
+
+        ; --- BOTH RED ---
+        MVI A,04H
+        OUT 01H
+        MVI A,04H
+        OUT 02H
+        CALL DELAY_1S
+
+        ; --- WALK ON ---
+        MVI A,01H
+        OUT 03H
+        CALL DELAY_5S
+
+        ; --- WALK OFF ---
+        MVI A,00H
+        OUT 03H
+
+        ; ---- resume previous traffic state ----
+        LDA 9001H       ; load saved state
+
+        CPI 00H
+        JZ RESUME_NS_GREEN
+
+        CPI 01H
+        JZ RESUME_NS_YELLOW
+
+        CPI 02H
+        JZ RESUME_EW_GREEN
+
+        CPI 03H
+        JZ RESUME_EW_YELLOW
+
+        RET            ; fallback
+
+RESUME_NS_GREEN:
+        JMP NS_GREEN_PHASE
+
+RESUME_NS_YELLOW:
+        JMP NS_YELLOW_PHASE
+
+RESUME_EW_GREEN:
+        JMP EW_GREEN_PHASE
+
+RESUME_EW_YELLOW:
+        JMP EW_YELLOW_PHASE
+
+
+
+; ==============================================================
+; DELAYS
+; ==============================================================
+
+DELAY_10S:
+        MVI B,0EH
+D10:
+        CALL DELAY_1S
+        DCR B
+        JNZ D115
+        RET
+
+DELAY_5S:
+        MVI B,09H
+D5:
+        CALL DELAY_1S
+        DCR B
+        JNZ D9
+        RET
+
+DELAY_3S:
+        MVI B,03H
+D3:
+        CALL DELAY_1S
+        DCR B
+        JNZ D3
+        RET
+
+DELAY_1S:
+        LXI B,0FFFFH
+D1:
+        DCX B
+        MOV A,B
+        ORA C
+        JNZ D1
+        RET
+
+#END
